@@ -1,6 +1,6 @@
 // Package jalalix is a Jalali (Persian / Shamsi) calendar library.
 //
-// Algorithm matches @jalalix/typescript@0.8.0: base date 1348/10/11 (= 1970-01-01),
+// Algorithm matches @jalalix/typescript@0.9.0: base date 1348/10/11 (= 1970-01-01),
 // leapYearDivision = 0.24219858156.
 //
 // Method names are idiomatic Go (Create, ParseJalali, Format, …). TypeScript
@@ -27,13 +27,14 @@ const (
 )
 
 var (
-	weekDaysNames = []string{"شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "چهار شنبه", "پنج شنبه", "جمعه"}
-	weekDaysLetters = []string{"ش", "ی", "د", "س", "چ", "پ", "ج"}
-	weekDaysGregorianNames = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+	weekDaysNames            = []string{"شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "چهار شنبه", "پنج شنبه", "جمعه"}
+	weekDaysLetters          = []string{"ش", "ی", "د", "س", "چ", "پ", "ج"}
+	weekDaysGregorianNames   = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 	weekDaysGregorianLetters = []string{"S", "M", "T", "W", "T", "F", "S"}
-	monthsNames = []string{"فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"}
-	monthsGregorianNames = []string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
-	persianNumbers = []rune{'۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'}
+	monthsNames              = []string{"فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"}
+	monthsGregorianNames     = []string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+	persianNumbers           = []rune{'۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'}
+	arabicNumbers            = []rune{'٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'}
 )
 
 const (
@@ -48,6 +49,14 @@ type Options struct {
 	Timezone string
 }
 
+// QueryDateOptions configures NormalizeQueryDate (TS: { timezone, jalaliYearMin, jalaliYearMax }).
+// JalaliYearMin / JalaliYearMax of 0 mean "use the default" (1 / 1899).
+type QueryDateOptions struct {
+	Timezone      string
+	JalaliYearMin int
+	JalaliYearMax int
+}
+
 // FormatOptions configures Format (TS: { calendar, persianDigits }).
 type FormatOptions struct {
 	Calendar      string // "jalali" (default) or "gregorian"
@@ -55,14 +64,14 @@ type FormatOptions struct {
 }
 
 type wallParts struct {
-	year, month, day int
+	year, month, day         int
 	hour, minute, second, ms int
 }
 
 type jalaliDate struct {
-	year, month, day int
+	year, month, day    int
 	hours, min, sec, ms int
-	isLeapYear bool
+	isLeapYear          bool
 }
 
 // JalaliX holds a UTC Unix-millisecond instant plus an IANA timezone id.
@@ -113,17 +122,17 @@ func (j *JalaliX) normalizeTimezone(timezone string) (string, *time.Location, er
 	lowered := strings.ToLower(strings.TrimSpace(timezone))
 
 	switch lowered {
-		case "default", "local", "system":
-			id := hostTimezone()
-			loc, err := loadLocation(id)
+	case "default", "local", "system":
+		id := hostTimezone()
+		loc, err := loadLocation(id)
 
-			if err != nil {
-				return "UTC", time.UTC, nil
-			}
-
-			return id, loc, nil
-		case "utc", "gmt":
+		if err != nil {
 			return "UTC", time.UTC, nil
+		}
+
+		return id, loc, nil
+	case "utc", "gmt":
+		return "UTC", time.UTC, nil
 	}
 
 	loc, err := loadLocation(timezone)
@@ -342,7 +351,7 @@ func (j *JalaliX) toGregorian(jDate jalaliDate) int64 {
 		}
 	}
 
-	// TS: jDate.hours ?? wall.hour — after toJalali, jalali HMS matches wall.
+	// TS: jDate.hours ?? wall.hour - after toJalali, jalali HMS matches wall.
 	hours, min, sec, ms := wall.hour, wall.minute, wall.second, wall.ms
 
 	wallAsUTC := diffDays*dateLength + int64(hours*3600+min*60+sec)*1000 + int64(ms)
@@ -464,26 +473,29 @@ func (j *JalaliX) normalizeJalali(jDate jalaliDate, year, month, day int) int64 
 }
 
 var isoDateOnly = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-var jalaliParseRE = regexp.MustCompile(`^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$`)
+var jalaliParseRE = regexp.MustCompile(`^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$`)
+var queryDateRE = regexp.MustCompile(`^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:Z|[+-]\d{2}:?\d{2})?)?`)
+var fracSecondsRE = regexp.MustCompile(`(\d{2}:\d{2}:\d{2})\.\d+`)
+var nanRE = regexp.MustCompile(`(?i)nan`)
 
 func parseInputMS(value any) (int64, error) {
 	switch v := value.(type) {
-		case int:
-			return int64(v), nil
-		case int64:
-			return v, nil
-		case float64:
-			return int64(v), nil
-		case time.Time:
-			return v.UnixMilli(), nil
-		case *JalaliX:
-			return v.ms, nil
-		case JalaliX:
-			return v.ms, nil
-		case string:
-			return parseISOString(v)
-		default:
-			return 0, fmt.Errorf("JalaliX.Create: unsupported date type %T", value)
+	case int:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case float64:
+		return int64(v), nil
+	case time.Time:
+		return v.UnixMilli(), nil
+	case *JalaliX:
+		return v.ms, nil
+	case JalaliX:
+		return v.ms, nil
+	case string:
+		return parseISOString(v)
+	default:
+		return 0, fmt.Errorf("JalaliX.Create: unsupported date type %T", value)
 	}
 }
 
@@ -609,19 +621,211 @@ func MustParseJalali(value string, opts ...Options) *JalaliX {
 	return j
 }
 
+// toFloat reports whether value is a Go numeric type (not a string) and its float64 value.
+func toFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int8:
+		return float64(v), true
+	case int16:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint8:
+		return float64(v), true
+	case uint16:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	case float32:
+		return float64(v), true
+	case float64:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func isNumericString(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	_, err := strconv.ParseFloat(s, 64)
+
+	return err == nil
+}
+
+// isValidJalaliCivilDate reports whether year/month/day is a valid Jalali civil date (year >= 1).
+func isValidJalaliCivilDate(year, month, day int) bool {
+	if year < 1 || month < 1 || month > 12 || day < 1 {
+		return false
+	}
+
+	if month <= 6 {
+		return day <= 31
+	}
+
+	if month <= 11 {
+		return day <= 30
+	}
+
+	if checkLeapYear(year) {
+		return day <= 30
+	}
+
+	return day <= 29
+}
+
+// isValidGregorianDate reports whether year/month/day is a valid Gregorian civil date.
+func isValidGregorianDate(year, month, day int) bool {
+	if month < 1 || month > 12 || day < 1 {
+		return false
+	}
+
+	t := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+
+	return t.Year() == year && int(t.Month()) == month && t.Day() == day
+}
+
+func normalizeQueryTimestamp(timestamp int64, opts QueryDateOptions) any {
+	if timestamp > 9999999999 {
+		timestamp = int64(math.Floor(float64(timestamp) / 1000))
+	}
+
+	if timestamp <= 0 {
+		return nil
+	}
+
+	out, err := Create(timestamp*1000, Options{Timezone: opts.Timezone})
+
+	if err != nil {
+		return nil
+	}
+
+	return out.Format("YYYY-MM-DD HH:mm:ss", FormatOptions{Calendar: "gregorian"})
+}
+
+// NormalizeQueryDate soft-normalizes loose query / form date inputs into a Gregorian
+// "Y-m-d H:i:s" string. TS: normalizeQueryDate.
+//
+// Handles empty/sentinel values (nil, "", "null", "undefined", "Invalid Date", values
+// containing "NaN"), unix timestamps (seconds or milliseconds), Persian/Arabic-Indic
+// digits, "/" "-" "." separators, fractional seconds, optional "Z" / offset suffixes,
+// and auto-detects Jalali vs Gregorian by year band: years in jalaliYearMin...jalaliYearMax
+// (default 1...1899) are treated as Jalali when the civil date is valid; otherwise Gregorian.
+//
+// Invalid or unrecognized values are returned cleaned (digits normalized) rather than
+// causing an error; sentinels and non-positive timestamps return nil. Non-string /
+// non-numeric values pass through unchanged.
+func NormalizeQueryDate(value any, opts ...QueryDateOptions) any {
+	var opt QueryDateOptions
+
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
+	if value == nil {
+		return nil
+	}
+
+	if s, ok := value.(string); ok {
+		if s == "null" || s == "" || s == "undefined" || strings.EqualFold(s, "invalid date") || nanRE.MatchString(s) {
+			return nil
+		}
+	}
+
+	if f, ok := toFloat(value); ok {
+		return normalizeQueryTimestamp(int64(f), opt)
+	}
+
+	s, ok := value.(string)
+
+	if !ok {
+		return value
+	}
+
+	trimmed := strings.TrimSpace(s)
+
+	if isNumericString(trimmed) {
+		f, _ := strconv.ParseFloat(trimmed, 64)
+
+		return normalizeQueryTimestamp(int64(f), opt)
+	}
+
+	digits := FromPersian(s)
+	digits = fracSecondsRE.ReplaceAllString(digits, "$1")
+
+	m := queryDateRE.FindStringSubmatch(digits)
+
+	if m == nil {
+		return digits
+	}
+
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+	hour, minute, second := 0, 0, 0
+
+	if m[4] != "" {
+		hour, _ = strconv.Atoi(m[4])
+	}
+
+	if m[5] != "" {
+		minute, _ = strconv.Atoi(m[5])
+	}
+
+	if m[6] != "" {
+		second, _ = strconv.Atoi(m[6])
+	}
+
+	yearMin := opt.JalaliYearMin
+
+	if yearMin == 0 {
+		yearMin = 1
+	}
+
+	yearMax := opt.JalaliYearMax
+
+	if yearMax == 0 {
+		yearMax = 1899
+	}
+
+	if year >= yearMin && year <= yearMax && isValidJalaliCivilDate(year, month, day) {
+		jalaliStr := fmt.Sprintf("%04d/%02d/%02d %02d:%02d:%02d", year, month, day, hour, minute, second)
+
+		if d, err := ParseJalali(jalaliStr, Options{Timezone: opt.Timezone}); err == nil {
+			return d.Format("YYYY-MM-DD HH:mm:ss", FormatOptions{Calendar: "gregorian"})
+		}
+	}
+
+	if isValidGregorianDate(year, month, day) {
+		return fmt.Sprintf("%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second)
+	}
+
+	return digits
+}
+
 // IsValidDate reports whether value is a usable date input.
 func IsValidDate(value any) bool {
 	switch v := value.(type) {
-		case time.Time:
-			return !v.IsZero()
-		case *JalaliX:
-			return v != nil
-		case JalaliX:
-			return true
-		case int, int64, float64:
-			return true
-		default:
-			return false
+	case time.Time:
+		return !v.IsZero()
+	case *JalaliX:
+		return v != nil
+	case JalaliX:
+		return true
+	case int, int64, float64:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -640,7 +844,7 @@ func ToPersian(s string) string {
 	return b.String()
 }
 
-// FromPersian converts Persian numerals to Western digits.
+// FromPersian converts Persian (۰-۹) and Arabic-Indic (٠-٩) numerals to Western digits.
 func FromPersian(s string) string {
 	var b strings.Builder
 
@@ -652,6 +856,16 @@ func FromPersian(s string) string {
 				b.WriteByte(byte('0' + i))
 				found = true
 				break
+			}
+		}
+
+		if !found {
+			for i, a := range arabicNumbers {
+				if r == a {
+					b.WriteByte(byte('0' + i))
+					found = true
+					break
+				}
 			}
 		}
 
@@ -987,28 +1201,28 @@ func (j *JalaliX) Format(pattern string, args ...any) string {
 
 	if len(args) > 0 {
 		switch v := args[0].(type) {
-			case FormatOptions:
+		case FormatOptions:
+			persian = v.PersianDigits
+			useGregorian = v.Calendar == "gregorian"
+		case *FormatOptions:
+			if v != nil {
 				persian = v.PersianDigits
 				useGregorian = v.Calendar == "gregorian"
-			case *FormatOptions:
-				if v != nil {
-					persian = v.PersianDigits
-					useGregorian = v.Calendar == "gregorian"
+			}
+		case map[string]any:
+			if pd, ok := v["persianDigits"].(bool); ok {
+				persian = pd
+			}
+			if c, ok := v["calendar"].(string); ok {
+				useGregorian = c == "gregorian"
+			}
+		case bool:
+			persian = v
+			if len(args) > 1 {
+				if g, ok := args[1].(bool); ok {
+					useGregorian = g
 				}
-			case map[string]any:
-				if pd, ok := v["persianDigits"].(bool); ok {
-					persian = pd
-				}
-				if c, ok := v["calendar"].(string); ok {
-					useGregorian = c == "gregorian"
-				}
-			case bool:
-				persian = v
-				if len(args) > 1 {
-					if g, ok := args[1].(bool); ok {
-						useGregorian = g
-					}
-				}
+			}
 		}
 	}
 
